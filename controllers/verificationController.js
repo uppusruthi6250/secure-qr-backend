@@ -77,8 +77,8 @@ const getVerificationStatus = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      organizationStatus: organization.verification.status || organization.verificationStatus,
-      rejectionReason: organization.verification.rejectionReason || '',
+      organizationStatus: organization.verification?.status || organization.verificationStatus,
+      rejectionReason: organization.verification?.rejectionReason || '',
       verificationRecord: record || null,
       organization,
     });
@@ -92,31 +92,28 @@ const getVerificationStatus = async (req, res, next) => {
 // @access  Private (ADMIN)
 const getAllVerifications = async (req, res, next) => {
   try {
-    const organizations = await Organization.find().sort({ createdAt: -1 });
+    const records = await VerificationRecord.find().sort({ createdAt: -1 });
 
-    const verifications = await Promise.all(
-      organizations.map(async (org) => {
-        const record = await VerificationRecord.findOne({ organizationId: org.organizationId });
+    const populatedRecords = await Promise.all(
+      records.map(async (rec) => {
+        const org = await Organization.findOne({ organizationId: rec.organizationId });
         return {
-          verificationId: record ? record.verificationId : org.organizationId,
-          organizationId: org.organizationId,
-          verificationType: record ? record.verificationType : (org.applicableRegistrations[0] || 'MANUAL'),
-          registrationNumber: record ? record.registrationNumber : (org.registrationNumbers?.gstin || org.registrationNumbers?.fssai || 'N/A'),
-          status: org.verification.status || org.verificationStatus,
-          adminNotes: org.verification.adminNotes || '',
-          rejectionReason: org.verification.rejectionReason || '',
-          verifiedAt: org.verification.verifiedAt || null,
-          createdAt: org.createdAt,
-          organization: org,
+          verificationId: rec.verificationId,
+          organizationId: rec.organizationId,
+          verificationType: rec.verificationType || org?.applicableRegistrations?.[0] || 'MANUAL',
+          registrationNumber: rec.registrationNumber || org?.registrationNumbers?.gstin || 'PENDING',
+          status: org?.verification?.status || org?.verificationStatus || rec.status || 'PENDING_VERIFICATION',
+          adminNotes: org?.verification?.adminNotes || rec.adminNotes || '',
+          rejectionReason: org?.verification?.rejectionReason || '',
+          verifiedAt: org?.verification?.verifiedAt || rec.verifiedAt || null,
+          createdAt: rec.createdAt,
+          documentReference: rec.documentReference || '',
         };
       })
     );
 
-    return res.status(200).json({
-      success: true,
-      count: verifications.length,
-      verifications,
-    });
+    // Return direct JSON Array as expected by Android List<VerificationRecord>
+    return res.status(200).json(populatedRecords);
   } catch (error) {
     next(error);
   }
@@ -138,7 +135,6 @@ const reviewVerification = async (req, res, next) => {
       });
     }
 
-    // Find organization by organizationId or userId or verificationId
     let organization = await Organization.findOne({
       $or: [{ organizationId: id }, { userId: id }],
     });
@@ -178,7 +174,6 @@ const reviewVerification = async (req, res, next) => {
 
     await organization.save();
 
-    // Update VerificationRecord
     await VerificationRecord.findOneAndUpdate(
       { organizationId: organization.organizationId },
       {
