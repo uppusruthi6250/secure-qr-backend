@@ -38,11 +38,12 @@ const registerQr = async (req, res, next) => {
       });
     }
 
-    // STRICT SECURITY RULE: Only VERIFIED organizations can register active payment QR codes!
-    if (organization.verificationStatus !== 'VERIFIED') {
+    // STRICT SECURITY RULE: Only VERIFIED/APPROVED organizations can register active payment QR codes!
+    const orgStatus = organization.verification?.status || organization.verificationStatus;
+    if (orgStatus !== 'VERIFIED' && orgStatus !== 'APPROVED') {
       return res.status(403).json({
         success: false,
-        message: 'Forbidden. Only VERIFIED organizations are permitted to register payment QR codes. Your current verification status is: ' + organization.verificationStatus,
+        message: 'Forbidden. Only APPROVED organizations are permitted to register payment QR codes. Your current status is: ' + (orgStatus || 'PENDING_VERIFICATION'),
       });
     }
 
@@ -158,13 +159,14 @@ const verifyQr = async (req, res, next) => {
     }
 
     // 3. Check Organization verification status
-    if (organization.verificationStatus !== 'VERIFIED') {
+    const orgStatus = organization.verification?.status || organization.verificationStatus;
+    if (orgStatus !== 'VERIFIED' && orgStatus !== 'APPROVED') {
       return res.status(200).json({
         verified: false,
         status: 'ORGANIZATION_UNVERIFIED',
         message: 'Warning: QR Code Could Not Be Verified',
         organizationName: organization.organizationName,
-        verificationDetails: `Organization verification status is ${organization.verificationStatus}.`,
+        verificationDetails: `Organization verification status is ${orgStatus}.`,
       });
     }
 
@@ -245,7 +247,7 @@ const verifyQr = async (req, res, next) => {
       organizationName: organization.organizationName,
       organizationType: organization.organizationType,
       upiId: qrCode.upiId,
-      organizationStatus: organization.verificationStatus,
+      organizationStatus: orgStatus,
       qrStatus: qrCode.status,
       message: 'QR Code Verified',
       verificationDetails: 'SHA-256 hash matched and RSA digital signature is valid.',
@@ -328,7 +330,7 @@ const updateQrStatus = async (req, res, next) => {
     if (!qrCode) {
       return res.status(404).json({
         success: false,
-        message: 'QR code record not found.',
+        message: 'Organization profile not found.',
       });
     }
 

@@ -106,31 +106,38 @@ const login = async (req, res, next) => {
       });
     }
 
-    // If user is an ORGANIZATION, check verification status
+    // STRICT ORGANIZATION VERIFICATION GUARD
     let orgStatus = null;
     let rejectionReason = null;
     if (user.role === 'ORGANIZATION') {
       const org = await Organization.findOne({ userId: user.userId });
       if (org) {
-        orgStatus = org.verification.status || org.verificationStatus;
-        rejectionReason = org.verification.rejectionReason || '';
+        orgStatus = org.verification?.status || org.verificationStatus || 'PENDING_VERIFICATION';
+        rejectionReason = org.verification?.rejectionReason || '';
 
-        if (orgStatus === 'PENDING_VERIFICATION' || orgStatus === 'UNDER_REVIEW') {
+        // If not APPROVED or VERIFIED, block login strictly!
+        if (orgStatus !== 'APPROVED' && orgStatus !== 'VERIFIED') {
+          if (orgStatus === 'REJECTED') {
+            return res.status(403).json({
+              success: false,
+              status: 'REJECTED',
+              message: 'Your organization registration was rejected by the administrator.',
+              rejectionReason: rejectionReason || 'Documents could not be verified.',
+            });
+          }
+
           return res.status(403).json({
             success: false,
             status: 'PENDING_VERIFICATION',
-            message: 'Your organization registration is still under admin verification.',
+            message: 'Your organization registration is still pending admin verification. You cannot access the dashboard or upload QR codes yet.',
           });
         }
-
-        if (orgStatus === 'REJECTED') {
-          return res.status(403).json({
-            success: false,
-            status: 'REJECTED',
-            message: 'Your organization registration was rejected.',
-            rejectionReason: rejectionReason || 'Documents could not be verified.',
-          });
-        }
+      } else {
+        return res.status(403).json({
+          success: false,
+          status: 'PENDING_VERIFICATION',
+          message: 'Organization profile not found. Please complete organization registration first.',
+        });
       }
     }
 
@@ -181,6 +188,13 @@ const getMe = async (req, res, next) => {
     let organization = null;
     if (user.role === 'ORGANIZATION') {
       organization = await Organization.findOne({ userId: user.userId });
+      const orgStatus = organization?.verification?.status || organization?.verificationStatus;
+      if (orgStatus !== 'APPROVED' && orgStatus !== 'VERIFIED') {
+        return res.status(403).json({
+          success: false,
+          message: 'Organization is not verified by admin.',
+        });
+      }
     }
 
     return res.status(200).json({
