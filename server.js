@@ -6,23 +6,8 @@ const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const { initializeRSAKeys } = require('./utils/cryptoUtils');
 
-// Route Imports
-const authRoutes = require('./routes/authRoutes');
-const organizationRoutes = require('./routes/organizationRoutes');
-const verificationRoutes = require('./routes/verificationRoutes');
-const adminRoutes = require('./routes/adminRoutes');
-const qrRoutes = require('./routes/qrRoutes');
-const fraudReportRoutes = require('./routes/fraudReportRoutes');
-const logRoutes = require('./routes/logRoutes');
-
 // Load environment variables
 dotenv.config();
-
-// Connect to MongoDB Database
-connectDB();
-
-// Initialize Server RSA Key Pair for Cryptographic Digital Signatures
-initializeRSAKeys();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -68,14 +53,14 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/organizations', organizationRoutes);
-app.use('/api/verifications', verificationRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/qr', qrRoutes);
-app.use('/api/fraud-reports', fraudReportRoutes);
-app.use('/api/logs', logRoutes);
+// Route Imports & Registration
+app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/organizations', require('./routes/organizationRoutes'));
+app.use('/api/verifications', require('./routes/verificationRoutes'));
+app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/qr', require('./routes/qrRoutes'));
+app.use('/api/fraud-reports', require('./routes/fraudReportRoutes'));
+app.use('/api/logs', require('./routes/logRoutes'));
 
 // Global Error Handling Middleware
 app.use((err, req, res, next) => {
@@ -95,13 +80,16 @@ app.use((req, res) => {
   });
 });
 
-// Start Express Server
+// Start Express Server IMMEDIATELY so Render detects the open port
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`==================================================`);
   console.log(`🚀 Secure QR Backend Server running on port ${PORT}`);
   console.log(`📡 Local URL: http://localhost:${PORT}`);
-  console.log(`📱 Android Emulator URL: http://10.0.2.2:${PORT}`);
   console.log(`==================================================`);
+
+  // Connect to MongoDB and initialize RSA keys after server is listening
+  connectDB();
+  initializeRSAKeys();
 });
 
 module.exports = app;
