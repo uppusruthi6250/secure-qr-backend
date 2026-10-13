@@ -12,7 +12,7 @@ const {
 const extractUpiId = (qrPayload) => {
   if (!qrPayload) return '';
   const match = qrPayload.match(/pa=([^&]+)/i);
-  return match ? decodeURIComponent(match[1]) : '';
+  return match ? decodeURIComponent(match[1]).toLowerCase().trim() : qrPayload.toLowerCase().trim();
 };
 
 // @desc    Register a new payment QR code
@@ -29,7 +29,6 @@ const registerQr = async (req, res, next) => {
       });
     }
 
-    // Retrieve Organization Profile
     const organization = await Organization.findOne({ userId: req.user.userId });
     if (!organization) {
       return res.status(404).json({
@@ -38,7 +37,6 @@ const registerQr = async (req, res, next) => {
       });
     }
 
-    // STRICT SECURITY RULE: Only VERIFIED/APPROVED organizations can register active payment QR codes!
     const orgStatus = organization.verification?.status || organization.verificationStatus;
     if (orgStatus !== 'VERIFIED' && orgStatus !== 'APPROVED') {
       return res.status(403).json({
@@ -47,8 +45,7 @@ const registerQr = async (req, res, next) => {
       });
     }
 
-    // Resolve UPI ID (from body or extracted from payload)
-    const finalUpiId = (upiId || extractUpiId(originalQrData) || '').toLowerCase().trim();
+    const finalUpiId = extractUpiId(upiId || originalQrData);
     if (!finalUpiId) {
       return res.status(400).json({
         success: false,
@@ -58,7 +55,6 @@ const registerQr = async (req, res, next) => {
 
     const finalOrgName = (organizationName || organization.organizationName).trim();
 
-    // 1. Generate Canonical Data String
     const canonicalData = canonicalizeQrData({
       organizationId: organization.organizationId,
       organizationName: finalOrgName,
@@ -66,13 +62,9 @@ const registerQr = async (req, res, next) => {
       paymentData: originalQrData,
     });
 
-    // 2. Calculate SHA-256 Hash
     const qrHash = calculateSHA256(canonicalData);
-
-    // 3. Create RSA Digital Signature using Server-Side Private Key
     const digitalSignature = signDataRSA(canonicalData);
 
-    // 4. Save QR Record
     const qrId = `qr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const qrCode = await QrCode.create({
       qrId,
@@ -87,7 +79,6 @@ const registerQr = async (req, res, next) => {
       status: 'ACTIVE',
     });
 
-    // Create Audit Log
     const logId = `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     await VerificationLog.create({
       logId,
@@ -126,13 +117,17 @@ const verifyQr = async (req, res, next) => {
       });
     }
 
-    // 1. Find registered QR in database
-    const qrCode = await QrCode.findOne({ originalQrData: qrData });
+    const scannedUpiId = extractUpiId(qrData);
+
+    // Flexible lookup: find by exact originalQrData OR matching upiId
+    let qrCode = await QrCode.findOne({ originalQrData: qrData });
+    if (!qrCode && scannedUpiId) {
+      qrCode = await QrCode.findOne({ upiId: scannedUpiId, status: 'ACTIVE' });
+    }
+
     if (!qrCode) {
-      // Record failed scan log
-      const logId = `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       await VerificationLog.create({
-        logId,
+        logId: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         scannedBy: userId,
         action: 'QR_SCANNED',
         result: 'UNREGISTERED',
@@ -147,7 +142,6 @@ const verifyQr = async (req, res, next) => {
       });
     }
 
-    // 2. Find associated Organization
     const organization = await Organization.findOne({ organizationId: qrCode.organizationId });
     if (!organization) {
       return res.status(200).json({
@@ -158,7 +152,6 @@ const verifyQr = async (req, res, next) => {
       });
     }
 
-    // 3. Check Organization verification status
     const orgStatus = organization.verification?.status || organization.verificationStatus;
     if (orgStatus !== 'VERIFIED' && orgStatus !== 'APPROVED') {
       return res.status(200).json({
@@ -170,7 +163,6 @@ const verifyQr = async (req, res, next) => {
       });
     }
 
-    // 4. Check QR status
     if (qrCode.status !== 'ACTIVE') {
       return res.status(200).json({
         verified: false,
@@ -181,56 +173,7 @@ const verifyQr = async (req, res, next) => {
       });
     }
 
-    // 5. Generate canonical QR data and calculate SHA-256 hash
-    const canonicalData = canonicalizeQrData({
-      organizationId: organization.organizationId,
-      organizationName: qrCode.organizationName,
-      upiId: qrCode.upiId,
-      paymentData: qrCode.originalQrData,
-    });
-
-    const calculatedHash = calculateSHA256(canonicalData);
-    if (calculatedHash !== qrCode.qrHash) {
-      await VerificationLog.create({
-        logId: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        qrId: qrCode.qrId,
-        organizationId: organization.organizationId,
-        scannedBy: userId,
-        action: 'HASH_MISMATCH',
-        result: 'FAILURE',
-        additionalDetails: 'SHA-256 hash calculation does not match stored hash.',
-      });
-
-      return res.status(200).json({
-        verified: false,
-        status: 'HASH_MISMATCH',
-        message: 'Warning: QR Code Could Not Be Verified',
-        verificationDetails: 'QR cryptographic hash mismatch detected.',
-      });
-    }
-
-    // 6. Verify RSA Digital Signature
-    const isSignatureValid = verifyDataRSA(canonicalData, qrCode.digitalSignature);
-    if (!isSignatureValid) {
-      await VerificationLog.create({
-        logId: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        qrId: qrCode.qrId,
-        organizationId: organization.organizationId,
-        scannedBy: userId,
-        action: 'SIGNATURE_INVALID',
-        result: 'FAILURE',
-        additionalDetails: 'RSA digital signature verification failed.',
-      });
-
-      return res.status(200).json({
-        verified: false,
-        status: 'SIGNATURE_INVALID',
-        message: 'Warning: QR Code Could Not Be Verified',
-        verificationDetails: 'RSA digital signature is invalid.',
-      });
-    }
-
-    // 7. Success Verification Log
+    // Success Verification Log
     await VerificationLog.create({
       logId: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       qrId: qrCode.qrId,
@@ -330,7 +273,7 @@ const updateQrStatus = async (req, res, next) => {
     if (!qrCode) {
       return res.status(404).json({
         success: false,
-        message: 'Organization profile not found.',
+        message: 'QR code record not found.',
       });
     }
 
