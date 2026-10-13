@@ -1,21 +1,9 @@
 const mongoose = require('mongoose');
 
-const addressSchema = new mongoose.Schema({
-  buildingNumber: { type: String, required: true, trim: true },
-  street: { type: String, required: true, trim: true },
-  locality: { type: String, required: true, trim: true },
-  city: { type: String, required: true, trim: true },
-  state: { type: String, required: true, trim: true },
-  country: { type: String, required: true, trim: true },
-  pincode: { type: String, required: true, trim: true },
-  isRegisteredOfficeSame: { type: Boolean, default: true },
-  registeredOfficeAddress: { type: String, default: '' },
-});
-
 const documentSchema = new mongoose.Schema({
-  documentType: { type: String, required: true },
-  fileReference: { type: String, required: true },
-  originalName: { type: String, required: true },
+  documentType: { type: String, default: '' },
+  fileReference: { type: String, default: '' },
+  originalName: { type: String, default: '' },
   uploadDate: { type: Date, default: Date.now },
 });
 
@@ -39,8 +27,8 @@ const organizationSchema = new mongoose.Schema(
     },
     category: {
       type: String,
-      required: [true, 'Organization category is required'],
       trim: true,
+      default: 'Other',
     },
     customCategory: {
       type: String,
@@ -68,25 +56,18 @@ const organizationSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    // Flexible address (can be String or Object)
     address: {
-      type: addressSchema,
-      required: true,
+      type: mongoose.Schema.Types.Mixed,
+      required: [true, 'Organization address is required'],
     },
     applicableRegistrations: {
       type: [String],
       default: [],
     },
     registrationNumbers: {
-      gstin: { type: String, trim: true, default: '' },
-      fssai: { type: String, trim: true, default: '' },
-      mcaCin: { type: String, trim: true, default: '' },
-      msmeUdyam: { type: String, trim: true, default: '' },
-      pan: { type: String, trim: true, default: '' },
-      tan: { type: String, trim: true, default: '' },
-      tradeLicense: { type: String, trim: true, default: '' },
-      iec: { type: String, trim: true, default: '' },
-      professionalTax: { type: String, trim: true, default: '' },
-      otherRegistration: { type: String, trim: true, default: '' },
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
     documents: {
       type: [documentSchema],
@@ -95,13 +76,12 @@ const organizationSchema = new mongoose.Schema(
     verification: {
       status: {
         type: String,
-        enum: ['PENDING_VERIFICATION', 'APPROVED', 'REJECTED', 'SUSPENDED'],
+        enum: ['PENDING_VERIFICATION', 'APPROVED', 'REJECTED', 'SUSPENDED', 'UNDER_REVIEW', 'VERIFIED'],
         default: 'PENDING_VERIFICATION',
         index: true,
       },
       gstinVerificationStatus: {
         type: String,
-        enum: ['PENDING', 'VERIFIED', 'INVALID', 'NEEDS_CORRECTION'],
         default: 'PENDING',
       },
       adminNotes: { type: String, default: '' },
@@ -111,11 +91,21 @@ const organizationSchema = new mongoose.Schema(
       rejectedBy: { type: String, default: null },
       rejectedAt: { type: Date, default: null },
     },
-    // Backward compatibility helper
     verificationStatus: {
       type: String,
-      enum: ['PENDING_VERIFICATION', 'UNDER_REVIEW', 'APPROVED', 'VERIFIED', 'REJECTED', 'SUSPENDED'],
       default: 'PENDING_VERIFICATION',
+    },
+    organizationType: {
+      type: String,
+      default: 'SMALL_BUSINESS',
+    },
+    registrationType: {
+      type: String,
+      default: 'MANUAL',
+    },
+    registrationNumber: {
+      type: String,
+      default: 'PENDING',
     },
   },
   {

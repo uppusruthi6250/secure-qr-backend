@@ -34,6 +34,7 @@ const registerOrganization = async (req, res, next) => {
     const {
       organizationName,
       category,
+      organizationType,
       customCategory,
       description,
       email,
@@ -42,23 +43,28 @@ const registerOrganization = async (req, res, next) => {
       address,
       applicableRegistrations,
       registrationNumbers,
+      registrationType,
+      registrationNumber,
       documents,
     } = req.body;
 
-    if (!organizationName || !category || !email || !phone || !address) {
+    if (!organizationName || !email || !phone || !address) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide organizationName, category, email, phone, and address.',
+        message: 'Please provide organizationName, email, phone, and address.',
       });
     }
 
     // Check if organization profile already exists for this user
     let organization = await Organization.findOne({ userId: req.user.userId });
 
+    const finalCategory = category || organizationType || 'Other';
+    const finalRegType = registrationType || (applicableRegistrations && applicableRegistrations[0]) || 'MANUAL';
+    const finalRegNum = registrationNumber || (registrationNumbers && (registrationNumbers.gstin || registrationNumbers.fssai || registrationNumbers.mcaCin || registrationNumbers.msmeUdyam || registrationNumbers.pan)) || 'PENDING';
+
     if (organization) {
-      // Allow update / resubmit if rejected or pending
       organization.organizationName = organizationName;
-      organization.category = category;
+      organization.category = finalCategory;
       organization.customCategory = customCategory || '';
       organization.description = description || '';
       organization.email = email.toLowerCase();
@@ -67,6 +73,8 @@ const registerOrganization = async (req, res, next) => {
       organization.address = address;
       organization.applicableRegistrations = applicableRegistrations || [];
       organization.registrationNumbers = registrationNumbers || {};
+      organization.registrationType = finalRegType;
+      organization.registrationNumber = finalRegNum;
       if (documents && documents.length > 0) {
         organization.documents = documents;
       }
@@ -76,12 +84,11 @@ const registerOrganization = async (req, res, next) => {
 
       await organization.save();
 
-      // Update or create verification record
       await VerificationRecord.findOneAndUpdate(
         { organizationId: organization.organizationId },
         {
-          verificationType: (applicableRegistrations && applicableRegistrations[0]) || 'MANUAL',
-          registrationNumber: (registrationNumbers && (registrationNumbers.gstin || registrationNumbers.fssai || registrationNumbers.mcaCin || registrationNumbers.msmeUdyam || registrationNumbers.pan)) || 'PENDING',
+          verificationType: finalRegType,
+          registrationNumber: finalRegNum,
           status: 'UNDER_REVIEW',
           adminNotes: 'Resubmitted by organization for verification review.',
         },
@@ -102,7 +109,7 @@ const registerOrganization = async (req, res, next) => {
       organizationId,
       userId: req.user.userId,
       organizationName,
-      category,
+      category: finalCategory,
       customCategory: customCategory || '',
       description: description || '',
       email: email.toLowerCase(),
@@ -111,6 +118,8 @@ const registerOrganization = async (req, res, next) => {
       address,
       applicableRegistrations: applicableRegistrations || [],
       registrationNumbers: registrationNumbers || {},
+      registrationType: finalRegType,
+      registrationNumber: finalRegNum,
       documents: documents || [],
       verification: {
         status: 'PENDING_VERIFICATION',
@@ -121,14 +130,11 @@ const registerOrganization = async (req, res, next) => {
 
     // Create Verification Record
     const verificationId = `ver_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const primaryRegNum = (registrationNumbers && (registrationNumbers.gstin || registrationNumbers.fssai || registrationNumbers.mcaCin || registrationNumbers.msmeUdyam || registrationNumbers.pan)) || 'PENDING';
-    const primaryRegType = (applicableRegistrations && applicableRegistrations[0]) || 'MANUAL';
-
     await VerificationRecord.create({
       verificationId,
       organizationId,
-      verificationType: primaryRegType,
-      registrationNumber: primaryRegNum,
+      verificationType: finalRegType,
+      registrationNumber: finalRegNum,
       status: 'UNDER_REVIEW',
     });
 
