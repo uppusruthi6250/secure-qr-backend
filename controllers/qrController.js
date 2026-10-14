@@ -15,11 +15,6 @@ const extractUpiId = (qrPayload) => {
   return match ? decodeURIComponent(match[1]).toLowerCase().trim() : qrPayload.toLowerCase().trim();
 };
 
-// Escape regex special chars
-const escapeRegExp = (string) => {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-};
-
 // @desc    Register a new payment QR code
 // @route   POST /api/qr/register
 // @access  Private (VERIFIED ORGANIZATION ONLY)
@@ -105,7 +100,7 @@ const registerQr = async (req, res, next) => {
   }
 };
 
-// @desc    Verify Scanned QR Code (Bulletproof UPI ID Matching)
+// @desc    Verify Scanned QR Code (STRICT ANTI-QUISHING SECURITY)
 // @route   POST /api/qr/verify
 // @access  Public / Private (Customer Scan)
 const verifyQr = async (req, res, next) => {
@@ -124,28 +119,16 @@ const verifyQr = async (req, res, next) => {
 
     const scannedUpiId = extractUpiId(qrData);
 
-    // Bulletproof lookup: match by exact string, extracted upiId, or substring search
+    // STRICT LOOKUP: Must match EXACTLY either originalQrData OR exact registered upiId in database
     let qrCode = await QrCode.findOne({
       $or: [
         { originalQrData: qrData },
-        { upiId: scannedUpiId },
-        { originalQrData: { $regex: new RegExp(escapeRegExp(scannedUpiId), 'i') } }
+        { upiId: scannedUpiId }
       ],
       status: 'ACTIVE',
     });
 
-    // Fallback search across all active QRs to match by UPI ID substring
-    if (!qrCode && scannedUpiId) {
-      const allActive = await QrCode.find({ status: 'ACTIVE' });
-      for (const q of allActive) {
-        if (q.upiId && scannedUpiId && (q.upiId.toLowerCase() === scannedUpiId.toLowerCase() || scannedUpiId.includes(q.upiId) || q.upiId.includes(scannedUpiId))) {
-          qrCode = q;
-          break;
-        }
-      }
-    }
-
-    // STRICT REJECTION IF UNREGISTERED (ANTI-QUISHING)
+    // STRICT REJECTION: If not found in database, return unregistered warning immediately (Anti-Quishing)
     if (!qrCode) {
       await VerificationLog.create({
         logId: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -159,7 +142,7 @@ const verifyQr = async (req, res, next) => {
         verified: false,
         status: 'QR_UNREGISTERED',
         message: 'Warning: QR Code Could Not Be Verified',
-        verificationDetails: 'QR is not registered in the official verified organization database. This may be a suspicious or replaced QR code.',
+        verificationDetails: 'QR is not registered in the official verified organization database. This is an unregistered, fake, or suspicious quishing QR code.',
       });
     }
 
