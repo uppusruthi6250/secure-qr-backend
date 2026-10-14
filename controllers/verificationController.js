@@ -112,7 +112,6 @@ const getAllVerifications = async (req, res, next) => {
       })
     );
 
-    // Return direct JSON Array as expected by Android List<VerificationRecord>
     return res.status(200).json(populatedRecords);
   } catch (error) {
     next(error);
@@ -124,7 +123,7 @@ const getAllVerifications = async (req, res, next) => {
 // @access  Private (ADMIN)
 const reviewVerification = async (req, res, next) => {
   try {
-    const { id } = req.params; // organizationId or verificationId
+    const { id } = req.params; // verificationId or organizationId
     const { status, adminNotes, rejectionReason, gstinVerificationStatus } = req.body;
 
     const normalizedStatus = (status || '').toUpperCase();
@@ -135,23 +134,32 @@ const reviewVerification = async (req, res, next) => {
       });
     }
 
-    let organization = await Organization.findOne({
-      $or: [{ organizationId: id }, { userId: id }],
+    // Robust lookup: find verification record first, then organization
+    let record = await VerificationRecord.findOne({
+      $or: [
+        { verificationId: id },
+        { organizationId: id },
+      ],
     });
 
+    let organization = null;
+    if (record) {
+      organization = await Organization.findOne({ organizationId: record.organizationId });
+    }
+
     if (!organization) {
-      const record = await VerificationRecord.findOne({
-        $or: [{ verificationId: id }, { organizationId: id }],
+      organization = await Organization.findOne({
+        $or: [
+          { organizationId: id },
+          { userId: id },
+        ],
       });
-      if (record) {
-        organization = await Organization.findOne({ organizationId: record.organizationId });
-      }
     }
 
     if (!organization) {
       return res.status(404).json({
         success: false,
-        message: 'Organization not found.',
+        message: 'Organization not found for verification review.',
       });
     }
 
