@@ -100,7 +100,7 @@ const registerQr = async (req, res, next) => {
   }
 };
 
-// @desc    Verify Scanned QR Code (Anti-Quishing Logic)
+// @desc    Verify Scanned QR Code (Strict Anti-Quishing Logic)
 // @route   POST /api/qr/verify
 // @access  Public / Private (Customer Scan)
 const verifyQr = async (req, res, next) => {
@@ -119,38 +119,33 @@ const verifyQr = async (req, res, next) => {
 
     const scannedUpiId = extractUpiId(qrData);
 
-    // Ultra-flexible lookup ensuring camera scans and manual payload tests always succeed seamlessly
+    // STRICT LOOKUP: Must match either exact originalQrData OR matching registered upiId in database
     let qrCode = await QrCode.findOne({ originalQrData: qrData, status: 'ACTIVE' });
     if (!qrCode && scannedUpiId) {
       qrCode = await QrCode.findOne({
         $or: [
           { upiId: scannedUpiId },
-          { upiId: { $regex: new RegExp(scannedUpiId, 'i') } },
-          { originalQrData: { $regex: new RegExp(scannedUpiId, 'i') } }
+          { upiId: { $regex: new RegExp(`^${scannedUpiId}$`, 'i') } }
         ],
         status: 'ACTIVE'
       });
     }
 
-    // Fail-safe fallback for project demonstration: if any active QR exists, match it so camera scanning works 100% of the time
-    if (!qrCode) {
-      qrCode = await QrCode.findOne({ status: 'ACTIVE' }).sort({ createdAt: -1 });
-    }
-
+    // IF NOT FOUND IN DATABASE, REJECT STRICTLY (ANTI-QUISHING PROTECTION)
     if (!qrCode) {
       await VerificationLog.create({
         logId: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         scannedBy: userId,
         action: 'QR_SCANNED',
         result: 'UNREGISTERED',
-        additionalDetails: `Scanned QR not found in registry: ${qrData.substring(0, 50)}...`,
+        additionalDetails: `Scanned QR not found in official registry (Fake/Unregistered QR): ${qrData.substring(0, 50)}...`,
       });
 
       return res.status(200).json({
         verified: false,
         status: 'QR_UNREGISTERED',
         message: 'Warning: QR Code Could Not Be Verified',
-        verificationDetails: 'QR is not registered in the official verified organization database.',
+        verificationDetails: 'QR is not registered in the official verified organization database. This may be a suspicious or replaced QR code.',
       });
     }
 
@@ -164,7 +159,54 @@ const verifyQr = async (req, res, next) => {
       });
     }
 
-    const orgStatus = organization.verification?.status || organization.verificationStatus || 'APPROVED';
+    const orgStatus = organization.verification?.status || organization.verificationStatus;
+    if (orgStatus !== 'VERIFIED' && orgStatus !== 'APPROVED') {
+      return res.status(200).json({
+        verified: false,
+        status: 'ORGANIZATION_UNVERIFIED',
+        message: 'Warning: QR Code Could Not Be Verified',
+        organizationName: organization.organizationName,
+        verificationDetails: `Organization verification status is ${orgStatus}.`,
+      });
+    }
+
+    if (qrCode.status !== 'ACTIVE') {
+      return res.status(200).json({
+        verified: false,
+        status: qrCode.status === 'REVOKED' ? 'QR_REVOKED' : 'ORGANIZATION_SUSPENDED',
+        message: 'Warning: QR Code Could Not Be Verified',
+        organizationName: organization.organizationName,
+        verificationDetails: `QR code status is ${qrCode.status}.`,
+      });
+    }
+
+    // Verify SHA-256 Hash & RSA Digital Signature
+    const canonicalData = canonicalizeQrData({
+      organizationId: organization.organizationId,
+      organizationName: qrCode.organizationName,
+      upiId: qrCode.upiId,
+      paymentData: qrCode.originalQrData,
+    });
+
+    const calculatedHash = calculateSHA256(canonicalData);
+    if (calculatedHash !== qrCode.qrHash) {
+      return res.status(200).json({
+        verified: false,
+        status: 'HASH_MISMATCH',
+        message: 'Warning: QR Code Could Not Be Verified',
+        verificationDetails: 'QR cryptographic hash mismatch detected.',
+      });
+    }
+
+    const isSignatureValid = verifyDataRSA(canonicalData, qrCode.digitalSignature);
+    if (!isSignatureValid) {
+      return res.status(200).json({
+        verified: false,
+        status: 'SIGNATURE_INVALID',
+        message: 'Warning: QR Code Could Not Be Verified',
+        verificationDetails: 'RSA digital signature is invalid.',
+      });
+    }
 
     // Success Verification Log
     await VerificationLog.create({
