@@ -97,7 +97,7 @@ const registerQr = async (req, res, next) => {
   }
 };
 
-// @desc    Verify Scanned QR Code (Bulletproof Database Matching)
+// @desc    Verify Scanned QR Code (Unified Camera & Payload Verification with Strict Anti-Quishing)
 // @route   POST /api/qr/verify
 // @access  Public / Private (Customer Scan)
 const verifyQr = async (req, res, next) => {
@@ -116,10 +116,7 @@ const verifyQr = async (req, res, next) => {
 
     const scannedUpiId = extractUpiId(qrData);
 
-    // Robust database matching:
-    // 1. Exact originalQrData match
-    // 2. Exact upiId match
-    // 3. Substring / regex containment check
+    // 1. Direct database lookup by exact payload or UPI ID
     let qrCode = await QrCode.findOne({
       $or: [
         { originalQrData: qrData },
@@ -130,18 +127,19 @@ const verifyQr = async (req, res, next) => {
       status: 'ACTIVE',
     });
 
-    // Fallback: search all active QRs to match if UPI ID is contained within the scanned payload
+    // 2. Intelligent fallback: check all active QRs to match by extracted UPI ID normalization
     if (!qrCode && scannedUpiId) {
       const allActive = await QrCode.find({ status: 'ACTIVE' });
       for (const q of allActive) {
-        if (q.upiId && scannedUpiId && (q.upiId.toLowerCase() === scannedUpiId.toLowerCase() || scannedUpiId.includes(q.upiId) || q.upiId.includes(scannedUpiId) || qrData.includes(q.upiId))) {
+        const registeredUpiId = extractUpiId(q.originalQrData || q.upiId);
+        if (registeredUpiId && scannedUpiId && (registeredUpiId === scannedUpiId || scannedUpiId.includes(registeredUpiId) || registeredUpiId.includes(scannedUpiId))) {
           qrCode = q;
           break;
         }
       }
     }
 
-    // STRICT REJECTION IF UNREGISTERED (ANTI-QUISHING)
+    // STRICT ANTI-QUISHING REJECTION IF UNREGISTERED
     if (!qrCode) {
       await VerificationLog.create({
         logId: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
