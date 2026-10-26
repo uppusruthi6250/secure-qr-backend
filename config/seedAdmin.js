@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const FraudReport = require('../models/FraudReport');
 
 const seedAdminUser = async () => {
   try {
@@ -22,8 +23,21 @@ const seedAdminUser = async () => {
     } else {
       console.log(`ℹ️ Admin account already exists: ${existingAdmin.email}`);
     }
+
+    // Seed sample fraud report if none exist so admin dashboard displays data immediately
+    const reportCount = await FraudReport.countDocuments();
+    if (reportCount === 0) {
+      await FraudReport.create({
+        reportId: 'rep_sample_01',
+        reportedBy: 'usr_demo_customer',
+        reason: 'Suspicious QR',
+        description: 'Fake payment sticker pasted over counter QR code at local store.',
+        status: 'OPEN',
+      });
+      console.log('🚨 Sample fraud report seeded.');
+    }
   } catch (error) {
-    console.error(`❌ Error seeding Admin user: ${error.message}`);
+    console.error(`❌ Error seeding Admin user or reports: ${error.message}`);
   }
 };
 
