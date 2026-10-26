@@ -49,17 +49,13 @@ const createFraudReport = async (req, res, next) => {
   }
 };
 
-// @desc    Get all fraud reports (Admin)
+// @desc    Get all fraud reports (Admin) - Returns direct JSON array for Android Gson compatibility
 // @route   GET /api/fraud-reports
 // @access  Private (ADMIN)
 const getAllFraudReports = async (req, res, next) => {
   try {
     const reports = await FraudReport.find().sort({ createdAt: -1 });
-    return res.status(200).json({
-      success: true,
-      count: reports.length,
-      fraudReports: reports,
-    });
+    return res.status(200).json(reports);
   } catch (error) {
     next(error);
   }
